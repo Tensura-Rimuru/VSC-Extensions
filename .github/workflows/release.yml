@@ -1,0 +1,106 @@
+name: Release Extensions
+
+on:
+  push:
+    branches:
+      - DEV
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Build and release extensions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -t extensions < <(
+            find . \
+              -mindepth 2 \
+              -maxdepth 2 \
+              -type f \
+              -name package.json \
+              -not -path '*/node_modules/*' \
+              -print \
+            | sed 's#^\./##; s#/package.json$##' \
+            | sort
+          )
+
+          if [ "${#extensions[@]}" -eq 0 ]; then
+            echo "::error::No VS Code extensions were found."
+            exit 1
+          fi
+
+          echo "Found ${#extensions[@]} extension(s)."
+
+          for extension_dir in "${extensions[@]}"; do
+            echo ""
+            echo "======================================"
+            echo "Processing: ${extension_dir}"
+            echo "======================================"
+
+            pushd "${extension_dir}" >/dev/null
+
+            NAME=$(node -p "require('./package.json').name")
+            VERSION=$(node -p "require('./package.json').version")
+            TAG="${NAME}-v${VERSION}"
+
+            echo "Extension: ${NAME}"
+            echo "Version:   ${VERSION}"
+            echo "Release:   ${TAG}"
+
+            echo "Installing dependencies..."
+            npm install --no-audit --no-fund --no-package-lock
+
+            echo "Running tests..."
+            npm test
+
+            echo "Creating VSIX..."
+            rm -f ./*.vsix
+            npm run package
+
+            VSIX=$(find . -maxdepth 1 -type f -name '*.vsix' -print -quit)
+            if [ -z "${VSIX}" ]; then
+              echo "::error::No VSIX was generated for ${NAME}."
+              popd >/dev/null
+              exit 1
+            fi
+
+            echo "Generated VSIX: ${VSIX}"
+            echo "VSIX size: $(du -h "${VSIX}" | cut -f1)"
+
+            echo "Checking whether release already exists..."
+            if gh release view "${TAG}" >/dev/null 2>&1; then
+              echo "Release '${TAG}' already exists. Skipping creation."
+              popd >/dev/null
+              continue
+            fi
+
+            echo "Creating GitHub release '${TAG}'..."
+            gh release create "${TAG}" \
+              "${VSIX}" \
+              --title "${NAME} v${VERSION}" \
+              --generate-notes
+
+            echo "Release '${TAG}' created successfully."
+            popd >/dev/null
+          done
+
+          echo ""
+          echo "All extensions processed successfully."

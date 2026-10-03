@@ -1,0 +1,16 @@
+# Dependencies
+**/node_modules/
+
+# Build output
+**/dist/
+**/dist-test/
+
+# VS Code extension packages
+*.vsix
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db

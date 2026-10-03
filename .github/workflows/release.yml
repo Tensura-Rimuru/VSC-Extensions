@@ -1,17 +1,17 @@
-name: Release Extensions
+name: Build and Release Extensions
 
 on:
+  workflow_dispatch:
   push:
     branches:
-      - DEV
       - main
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
@@ -23,46 +23,69 @@ jobs:
         with:
           node-version: 22
 
-      - name: Build and release extensions
-        shell: bash
+      - name: Run tests
+        run: ./scripts/release.sh test
+
+  package:
+    name: Package VSIX
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Package extension
+        run: ./scripts/release.sh package
+
+      - name: Read extension metadata
+        id: metadata
+        run: |
+          echo "name=$(node -p "require('./rust-precise-folding/package.json').name")" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./rust-precise-folding/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.name }}-${{ steps.metadata.outputs.version }}
+          path: rust-precise-folding/*.vsix
+          if-no-files-found: error
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: package
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Read extension metadata
+        id: metadata
+        run: |
+          echo "name=$(node -p "require('./rust-precise-folding/package.json').name")" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./rust-precise-folding/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "tag=$(node -p "'rust-precise-folding-v' + require('./rust-precise-folding/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.name }}-${{ steps.metadata.outputs.version }}
+          path: artifacts
+
+      - name: Release extension
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -Eeuo pipefail
-
-          mapfile -t extensions < <(
-            find . \
-              -mindepth 2 \
-              -maxdepth 2 \
-              -type f \
-              -name package.json \
-              -not -path '*/node_modules/*' \
-              -print \
-            | sed 's#^\./##; s#/package.json$##' \
-            | sort
-          )
-
-          if [ "${#extensions[@]}" -eq 0 ]; then
-            echo "::error::No VS Code extensions were found."
-            exit 1
-          fi
-
-          echo "Found ${#extensions[@]} extension(s)."
-
-          for extension_dir in "${extensions[@]}"; do
-            echo ""
-            echo "======================================"
-            echo "Processing: ${extension_dir}"
-            echo "======================================"
-
-            pushd "${extension_dir}" >/dev/null
-
-            NAME=$(node -p "require('./package.json').name")
-            VERSION=$(node -p "require('./package.json').version")
-            TAG="${NAME}-v${VERSION}"
-
-            echo "Extension: ${NAME}"
-            echo "Version:   ${VERSION}"
-            echo "Release:   ${TAG}"
-
-            ech
+        run: ./scripts/release.sh release

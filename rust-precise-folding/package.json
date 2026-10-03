@@ -18,6 +18,11 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "compile": "tsc -p ./tsconfig.json",
     "watch": "tsc -p ./tsconfig.json --watch",

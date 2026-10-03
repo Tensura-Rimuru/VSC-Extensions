@@ -1,9 +1,0 @@
-.vscode/**
-.git/**
-node_modules/**
-dist-test/**
-test/**
-src/**
-tsconfig*.json
-*.log
-*.vsix

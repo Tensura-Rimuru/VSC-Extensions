@@ -24,7 +24,7 @@ jobs:
           node-version: 22
 
       - name: Run tests
-        run: ./scripts/release.sh test
+        run: bash ./scripts/release.sh test
 
   package:
     name: Package VSIX
@@ -40,20 +40,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Package extension
-        run: ./scripts/release.sh package
+      - name: Package extensions
+        run: bash ./scripts/release.sh package
 
-      - name: Read extension metadata
-        id: metadata
-        run: |
-          echo "name=$(node -p "require('./rust-precise-folding/package.json').name")" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p "require('./rust-precise-folding/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Upload VSIX artifact
+      - name: Upload VSIX artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.metadata.outputs.name }}-${{ steps.metadata.outputs.version }}
-          path: rust-precise-folding/*.vsix
+          name: vscode-extensions
+          path: "**/*.vsix"
           if-no-files-found: error
 
   release:
@@ -67,25 +61,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      - name: Read extension metadata
-        id: metadata
-        run: |
-          echo "name=$(node -p "require('./rust-precise-folding/package.json').name")" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p "require('./rust-precise-folding/package.json').version")" >> "$GITHUB_OUTPUT"
-          echo "tag=$(node -p "'rust-precise-folding-v' + require('./rust-precise-folding/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Download VSIX artifact
+      - name: Download VSIX artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ steps.metadata.outputs.name }}-${{ steps.metadata.outputs.version }}
+          name: vscode-extensions
           path: artifacts
 
-      - name: Release extension
+      - name: Release extensions
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/release.sh release
+        run: bash ./scripts/release.sh release

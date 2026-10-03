@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getDocCommentRanges, getRustFoldingRanges } from './folding';
+import { getCommentFoldingRanges, getRustFoldingRanges } from './folding';
 
 class RustPreciseFoldingProvider implements vscode.FoldingRangeProvider {
     provideFoldingRanges(
@@ -8,12 +8,7 @@ class RustPreciseFoldingProvider implements vscode.FoldingRangeProvider {
         token: vscode.CancellationToken,
     ): vscode.ProviderResult<vscode.FoldingRange[]> {
         const ranges: vscode.FoldingRange[] = [];
-        const lines = Array.from(
-            { length: document.lineCount },
-            (_, index) => document.lineAt(index).text,
-        );
-
-        for (const range of getDocCommentRanges(lines)) {
+        for (const range of getCommentFoldingRanges(document.getText())) {
             ranges.push(
                 new vscode.FoldingRange(
                     range.start,

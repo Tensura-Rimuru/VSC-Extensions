@@ -1,4 +1,4 @@
-import { __testing, getDocCommentRanges, getRustFoldingRanges } from '../src/folding';
+import { __testing, getCommentFoldingRanges, getDocCommentRanges, getRustFoldingRanges } from '../src/folding';
 
 function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -11,10 +11,12 @@ function deepEqual(actual: unknown, expected: unknown, message: string): void {
     const e = JSON.stringify(expected);
     assert(a === e, `${message}\nExpected: ${e}\nActual:   ${a}`);
 }
+
 function test(name: string, fn: () => void): void {
     fn();
     console.log(`PASS: ${name}`);
 }
+
 test('folds consecutive module documentation comments', () => {
     const source = [
         '//! module docs line 1',
@@ -28,6 +30,7 @@ test('folds consecutive module documentation comments', () => {
         { start: 0, end: 2, kind: 'comment' },
     ], 'Module documentation comments should fold.');
 });
+
 test('folds consecutive item documentation comments separately', () => {
     const source = [
         '/// line 1',
@@ -41,6 +44,48 @@ test('folds consecutive item documentation comments separately', () => {
         { start: 0, end: 1, kind: 'comment' },
     ], 'Item documentation comments should fold.');
 });
+
+test('folds consecutive normal line comments', () => {
+    const source = [
+        '// line 1',
+        '// line 2',
+        '// line 3',
+        'fn foo() {',
+        '}',
+    ].join('\n');
+
+    deepEqual(getCommentFoldingRanges(source), [
+        { start: 0, end: 2, kind: 'comment' },
+    ], 'Normal line comments should fold.');
+});
+
+test('folds multiline nested block comments', () => {
+    const source = [
+        '/* outer',
+        '   /* nested */',
+        '   outer continued',
+        '*/',
+        'fn foo() {',
+        '}',
+    ].join('\n');
+
+    deepEqual(getCommentFoldingRanges(source), [
+        { start: 0, end: 3, kind: 'comment' },
+    ], 'Nested block comments should fold as one comment range.');
+});
+
+test('does not treat trailing comments as a full-line comment block', () => {
+    const source = [
+        'let a = 1; // comment',
+        '// comment continued',
+        '// comment continued again',
+    ].join('\n');
+
+    deepEqual(getCommentFoldingRanges(source), [
+        { start: 1, end: 2, kind: 'comment' },
+    ], 'Trailing comments should not be merged with following full-line comments.');
+});
+
 test('keeps module and item documentation blocks separate', () => {
     const source = [
         '//! module',
@@ -54,6 +99,7 @@ test('keeps module and item documentation blocks separate', () => {
         { start: 2, end: 3, kind: 'comment' },
     ], 'Module and item comments should remain separate.');
 });
+
 test('folds async generic function including multiline where clause', () => {
     const source = `pub fn transient_async<T, F, Fut>(&mut self, f: F)
 where
@@ -65,8 +111,7 @@ where
 }
 `;
 
-    const ranges = getRustFoldingRanges(source);
-    deepEqual(ranges, [
+    deepEqual(getRustFoldingRanges(source), [
         { start: 0, end: 7, kind: 'syntax' },
     ], 'Multiline where clause should be included.');
 });
@@ -92,6 +137,23 @@ test('folds a function from the declaration line, not the opening brace line', (
     ], 'Function should fold from declaration line.');
 });
 
+test('does not mistake function pointer types for function bodies', () => {
+    const source = `struct Handler {
+    callback: fn(i32) -> i32,
+    value: i32,
+}
+
+fn real() {
+    callback();
+}
+`;
+
+    deepEqual(getRustFoldingRanges(source), [
+        { start: 0, end: 3, kind: 'syntax' },
+        { start: 5, end: 7, kind: 'syntax' },
+    ], 'Function pointer types must not create false function ranges.');
+});
+
 test('does not fold declaration-only functions', () => {
     deepEqual(
         getRustFoldingRanges('fn declaration_only();\n'),
@@ -106,9 +168,10 @@ test('ignores fn and braces in comments and strings', () => {
     /* nested /* fn ignored() { } */ comment */
     let x = "fn string() { }";
     let y = r###"fn raw() { }"###;
-    let z = 'x';
+    let z = '{';
 }
 `;
+
     deepEqual(getRustFoldingRanges(source), [
         { start: 0, end: 6, kind: 'syntax' },
     ], 'Strings and comments must not create false functions.');
@@ -123,6 +186,7 @@ test('folds multiline non-function Rust brace blocks', () => {
     }
 }
 `;
+
     deepEqual(getRustFoldingRanges(source), [
         { start: 0, end: 6, kind: 'syntax' },
         { start: 1, end: 5, kind: 'syntax' },
@@ -136,8 +200,20 @@ test('lexer only sees real fn keywords', () => {
 let s = "fn string() {}";
 let r = r#"fn raw() {}"#;
 `;
+
     assert(
         __testing.lexRust(source).filter(token => token.type === 'fn').length === 1,
-        'Only the real fn keyword should be lexed.'
+        'Only the real fn keyword should be lexed.',
     );
+});
+
+test('handles Rust lifetimes without hiding following braces', () => {
+    const source = `fn borrow<'a, 'b>(value: &'a str) -> &'b str {
+    value
+}
+`;
+
+    deepEqual(getRustFoldingRanges(source), [
+        { start: 0, end: 2, kind: 'syntax' },
+    ], 'Rust lifetimes must not interfere with brace detection.');
 });

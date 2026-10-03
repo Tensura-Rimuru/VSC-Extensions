@@ -1,8 +1,8 @@
 {
   "name": "rust-precise-folding",
   "displayName": "Rust Precise Folding",
-  "description": "Focused Rust folding for documentation comments, functions, methods, and Rust brace blocks.",
-  "version": "0.2.0",
+  "description": "Focused Rust folding for comments, functions, methods, and Rust brace blocks.",
+  "version": "0.2.1",
   "publisher": "Tensura-Rimuru",
   "license": "MIT",
   "repository": {
@@ -14,14 +14,15 @@
     "vscode": ">=1.90.0"
   },
   "activationEvents": [
-    "onLanguage:rust"
+    "onLanguage:rust",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "scripts": {
     "compile": "tsc -p ./tsconfig.json",
     "watch": "tsc -p ./tsconfig.json --watch",
     "test:compile": "tsc -p ./tsconfig.test.json",
-    "test": "npm run test:compile && node --test dist-test/test/folding.test.js",
+    "test": "npm run compile && npm run test:compile && node --test dist-test/test/folding.test.js dist-test/test/packaging.test.js",
     "package": "npm run compile && vsce package"
   },
   "devDependencies": {
@@ -33,7 +34,8 @@
   "contributes": {
     "configurationDefaults": {
       "[rust]": {
-        "editor.defaultFoldingRangeProvider": "Tensura-Rimuru.rust-precise-folding"
+        "editor.defaultFoldingRangeProvider": "Tensura-Rimuru.rust-precise-folding",
+        "editor.foldingStrategy": "auto"
       }
     }
   }

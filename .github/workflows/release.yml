@@ -3,7 +3,6 @@ name: Release Extensions
 on:
   push:
     branches:
-      - DEV
       - main
   workflow_dispatch:
 
@@ -30,6 +29,34 @@ jobs:
         run: |
           set -Eeuo pipefail
 
+          REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+          find_license() {
+            local candidate
+            for candidate in \
+              "$REPO_ROOT/LICENSE" \
+              "$REPO_ROOT/LICENCE" \
+              "$REPO_ROOT/LICENSE.md" \
+              "$REPO_ROOT/LICENCE.md" \
+              "$REPO_ROOT/LICENSE.txt" \
+              "$REPO_ROOT/LICENCE.txt"; do
+              if [[ -f "$candidate" ]]; then
+                printf '%s\n' "$candidate"
+                return 0
+              fi
+            done
+
+            return 1
+          }
+
+          LICENSE_SOURCE="$(find_license || true)"
+          if [[ -z "$LICENSE_SOURCE" ]]; then
+            echo "::error::No root license file found. Expected LICENSE, LICENCE, LICENSE.md, LICENSE.txt, LICENCE.md, or LICENCE.txt."
+            exit 1
+          fi
+
+          echo "Using central license: ${LICENSE_SOURCE#"$REPO_ROOT/"}"
+
           mapfile -t extensions < <(
             find . \
               -mindepth 2 \
@@ -42,7 +69,7 @@ jobs:
             | sort
           )
 
-          if [ "${#extensions[@]}" -eq 0 ]; then
+          if [[ "${#extensions[@]}" -eq 0 ]]; then
             echo "::error::No VS Code extensions were found."
             exit 1
           fi
@@ -65,6 +92,13 @@ jobs:
             echo "Version:   ${VERSION}"
             echo "Release:   ${TAG}"
 
+            # VSCE resolves the license relative to the extension root. Keep the
+            # repository license centralized, but stage a temporary copy only
+            # while creating the VSIX.
+            rm -f ./LICENSE
+            cp "$LICENSE_SOURCE" ./LICENSE
+            test -s ./LICENSE
+
             echo "Installing dependencies..."
             npm install --no-audit --no-fund --no-package-lock
 
@@ -73,10 +107,21 @@ jobs:
 
             echo "Creating VSIX..."
             rm -f ./*.vsix
-            npm run package
+
+            package_status=0
+            npm run package || package_status=$?
+
+            # Never keep the staged extension-local copy in the repository.
+            rm -f ./LICENSE
+
+            if [[ "$package_status" -ne 0 ]]; then
+              echo "::error::VSIX packaging failed for ${NAME}."
+              popd >/dev/null
+              exit "$package_status"
+            fi
 
             VSIX=$(find . -maxdepth 1 -type f -name '*.vsix' -print -quit)
-            if [ -z "${VSIX}" ]; then
+            if [[ -z "${VSIX}" ]]; then
               echo "::error::No VSIX was generated for ${NAME}."
               popd >/dev/null
               exit 1
@@ -84,6 +129,35 @@ jobs:
 
             echo "Generated VSIX: ${VSIX}"
             echo "VSIX size: $(du -h "${VSIX}" | cut -f1)"
+
+            # Verify the two files that are critical for an installable VSIX:
+            # the manifest entry point and the centrally maintained license.
+            python - "${VSIX}" <<'PY'
+          import json
+          import pathlib
+          import sys
+          import zipfile
+
+          vsix = pathlib.Path(sys.argv[1])
+          with zipfile.ZipFile(vsix) as archive:
+              names = set(archive.namelist())
+              manifest = json.loads(archive.read("extension/package.json"))
+
+              main = manifest.get("main")
+              if not main:
+                  raise SystemExit("::error::Extension manifest has no 'main' entry.")
+
+              main_path = "extension/" + main.lstrip("./")
+              if main_path not in names:
+                  raise SystemExit(
+                      f"::error::VSIX is missing its manifest main entry '{main_path}'."
+                  )
+
+              if "extension/LICENSE" not in names:
+                  raise SystemExit("::error::VSIX is missing the staged LICENSE file.")
+
+          print(f"VSIX validation passed: main={main_path}, LICENSE=present")
+          PY
 
             echo "Checking whether release already exists..."
             if gh release view "${TAG}" >/dev/null 2>&1; then
